@@ -1,0 +1,5 @@
+{
+    "debug.javascript.autoAttachFilter": "always",
+    "editor.snippetSuggestions": "none",
+    "react-native-tools.displayDebuggingCommandsButton": false
+}

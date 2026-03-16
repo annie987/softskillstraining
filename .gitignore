@@ -9,3 +9,5 @@ frontend/node_modules/
 # Temp files
 backend/temp/
 
+backend/.env
+frontend/.env
