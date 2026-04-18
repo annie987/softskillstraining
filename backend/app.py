@@ -31,6 +31,34 @@ def calculate_speech_rate(transcript, duration_seconds):
     minutes = duration_seconds / 60
     return round(word_count / minutes) if minutes > 0 else 0
 
+
+def generate_follow_up_question(transcript):
+    """Generate a follow-up question that digs deeper and challenges an assumption."""
+
+    follow_up_prompt = (
+        "You are a demanding interviewer who pushes back politely. "
+        "Read the candidate's response below and generate a single follow-up question that:\n"
+        "- challenges their assumptions,\n"
+        "- asks them to defend or justify an assertion,\n"
+        "- and forces them to explain the impact of their statement.\n\n"
+        "Answer with exactly one direct question; do not add commentary.\n\n"
+        f"Candidate response: {transcript}"
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a professional interviewer who challenges assumptions."},
+                {"role": "user", "content": follow_up_prompt},
+            ],
+            temperature=0.7,
+            max_tokens=80,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception:
+        return None
+
 @app.route('/login', methods=["POST"])
 def login():
     data = request.get_json(silent=True)
@@ -84,10 +112,16 @@ def analyse():
 
         speed = calculate_speech_rate(transcript_text, estimated_duration)
 
-        # Basic filler word analysis
-        filler_words = ["um", "uh", "like", "you know", "so", "actually", "basically", "right"]
+        # Basic filler word analysis (whole words only, not substrings)
+        import re
+        filler_words = ["um", "uh", "like", "you know", "actually", "basically", "right", "so"]
         lower = transcript_text.lower()
-        filler_counts = {w: lower.count(w) for w in filler_words}
+        filler_counts = {}
+        for word in filler_words:
+            # Use word boundaries to match whole words only
+            pattern = r'\b' + re.escape(word) + r'\b'
+            count = len(re.findall(pattern, lower))
+            filler_counts[word] = count
         total_fillers = sum(filler_counts.values())
 
         # Coaching feedback via OpenAI text model
@@ -116,11 +150,13 @@ def analyse():
                     {"role": "user", "content": coach_prompt},
                 ],
                 temperature=0.3,
-                max_tokens=250,
+                max_tokens=500,
             )
             coach_feedback = coach_resp.choices[0].message.content
         except Exception:
             coach_feedback = None
+
+        follow_up_question = generate_follow_up_question(transcript_text)
 
         return jsonify({
             "transcript": transcript_text,
@@ -128,6 +164,7 @@ def analyse():
             "fillers": filler_counts,
             "totalFillers": total_fillers,
             "coachFeedback": coach_feedback,
+            "followUpQuestion": follow_up_question,
         })
 
     except Exception as e:
