@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import WebcamView from "./components/WebcamView";
 import FeedbackPanel from "./components/FeedbackPanel";
 import { styles } from "./styles/session";
-import { FaUsers, FaLightbulb, FaHandshake, FaTrophy, FaMicrophone, FaCheckCircle, FaStar } from "react-icons/fa";
+import { FaUsers, FaLightbulb, FaHandshake, FaTrophy, FaMicrophone, FaCheckCircle } from "react-icons/fa";
 
 const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5001";
 
@@ -13,7 +13,14 @@ const QUESTION_CATEGORIES = {
     questions: [
       "Tell me about yourself and your professional background.",
       "What are your greatest strengths and how have you applied them in your career?",
-      "Describe a challenging situation you've faced and how you overcame it."
+      "Describe a challenging situation you've faced and how you overcame it.",
+      "What would you say is your biggest weakness, and how are you working on it?",
+      "Why are you interested in this role and this company?",
+      "How do you handle stress and pressure in the workplace?",
+      "Can you describe a time you received critical feedback and how you responded?",
+      "What motivates you to do your best work?",
+      "How do you stay organised when managing multiple tasks?",
+      "What kind of work environment helps you perform at your best?"
     ]
   },
   "Problem Solving": {
@@ -22,7 +29,14 @@ const QUESTION_CATEGORIES = {
     questions: [
       "Walk me through your approach to solving a complex problem.",
       "Describe a time when you had to make a decision with incomplete information.",
-      "How do you prioritize when you have multiple competing deadlines?"
+      "How do you prioritise when you have multiple competing deadlines?",
+      "Tell me about an idea you proposed that failed and what you learned.",
+      "How do you validate that your solution actually addresses the root cause?",
+      "Describe a time you had to pivot direction quickly—what triggered it?",
+      "How do you balance data-driven analysis with intuition?",
+      "When faced with a tight deadline, how do you choose what to cut?",
+      "Tell me about a time you simplified a complex process.",
+      "How do you handle conflicting stakeholder requirements?"
     ]
   },
   "Teamwork": {
@@ -31,7 +45,14 @@ const QUESTION_CATEGORIES = {
     questions: [
       "Tell me about a time you worked effectively in a team. What was your role?",
       "How do you handle disagreements or conflicts with colleagues?",
-      "Describe a time when you had to adapt your communication style to work with different personalities."
+      "Describe a time when you had to adapt your communication style to work with different personalities.",
+      "How do you build trust with new team members?",
+      "Tell me about a time you helped a teammate improve their performance.",
+      "How do you ensure your team stays aligned on goals?",
+      "Describe a situation where you led a team through uncertainty.",
+      "How do you respond when a team member misses a critical deadline?",
+      "How do you balance supporting others with driving your own work?",
+      "Tell me about a time you had to give difficult feedback and how you delivered it."
     ]
   },
   "Career Goals": {
@@ -40,7 +61,14 @@ const QUESTION_CATEGORIES = {
     questions: [
       "Where do you see yourself in 5 years, and how does this role fit into your career path?",
       "What motivates you in your professional work?",
-      "Describe a goal you set and achieved, and what you learned from the process."
+      "Describe a goal you set and achieved, and what you learned from the process.",
+      "What does success look like for you in this role?",
+      "What professional development areas are you focused on right now?",
+      "How do you evaluate whether a new opportunity is the right fit?",
+      "Tell me about a time you changed your career direction and why.",
+      "How do you stay motivated when progress is slow?",
+      "What would make you leave a job after a year?",
+      "How do you measure your own performance?"
     ]
   }
 };
@@ -51,6 +79,7 @@ export default function Session() {
   const streamRef = useRef(null);
   const [isRecording, setIsRecording] = useState(false);
   const [analysisData, setAnalysisData] = useState(null);
+  const [followUpQuestion, setFollowUpQuestion] = useState("");
   const [isAnalysing, setIsAnalysing] = useState(false);
   const [error, setError] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -94,34 +123,74 @@ export default function Session() {
 
       const data = await response.json();
       setAnalysisData(data);
-      
-      // Calculate score based on feedback
-      let calculatedScore = 50; // Base score
-      
-      // Adjust based on speech rate (ideal: 120-160 wpm)
-      const speechRate = data.speech_rate || 0;
-      if (speechRate >= 120 && speechRate <= 160) {
-        calculatedScore += 20;
-      } else if (speechRate >= 100 && speechRate <= 180) {
-        calculatedScore += 10;
+      setFollowUpQuestion(data.followUpQuestion || "");
+      // Calculate score based on analysis data. This scoring is intentionally strict.
+      // Start at 0, each section adds its own points.
+      let calculatedScore = 0;
+
+      // Use the backend fields (speed/totalFillers) and the transcript text.
+      const speechRate = data.speed ?? 0;
+      const fillerCount = data.totalFillers ?? 0;
+      const transcriptText = (data.transcript || "").trim();
+
+      // Silence indicates no evaluation needed (simulating "skip").
+      if (!transcriptText) {
+        setScore(10);
+        return;
       }
-      
-      // Adjust based on filler words (fewer is better)
-      const fillerCount = data.filler_words?.length || 0;
-      if (fillerCount === 0) {
-        calculatedScore += 20;
-      } else if (fillerCount <= 2) {
-        calculatedScore += 10;
-      } else if (fillerCount <= 5) {
-        calculatedScore += 5;
+
+      // If the answer is not related to the question at all, give 0.
+      const normalise = (text) =>
+        text
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, "")
+          .split(/\s+/)
+          .filter(Boolean);
+
+      const questionWords = new Set(normalise(currentQuestion || ""));
+      const transcriptWords = new Set(normalise(transcriptText));
+      let overlapRatio = 0;
+      if (questionWords.size > 0) {
+        const overlap = [...transcriptWords].filter((w) => questionWords.has(w)).length;
+        overlapRatio = overlap / questionWords.size;
+        if (overlapRatio < 0.25) {
+          setScore(0);
+          return;
+        }
       }
-      
-      // Cap at 100
-      calculatedScore = Math.min(calculatedScore, 100);
+
+      // Tick = points system (2 points each, 5 criteria)
+      // 1. Clear speaking (pace in ideal range)
+      if (speechRate >= 120 && speechRate <= 150) {
+        calculatedScore += 2;
+      }
+      // 2. Good structure (on-topic, overlap ratio >=0.5)
+      if (overlapRatio >= 0.5) {
+        calculatedScore += 2;
+      }
+      // 3. Confident tone (long enough answer, length >=30)
+      if (transcriptText && transcriptText.split(' ').length >= 30) {
+        calculatedScore += 2;
+      }
+      // 4. Concise (not too short or long, 30 <= length <=150)
+      if (transcriptText && transcriptText.split(' ').length >= 30 && transcriptText.split(' ').length <= 150) {
+        calculatedScore += 2;
+      }
+      // 5. Engaging (few fillers, fillerCount <=5)
+      if (fillerCount <= 5) {
+        calculatedScore += 2;
+      }
+
+      calculatedScore = Math.max(0, Math.min(10, Math.round(calculatedScore * 10) / 10));
       setScore(calculatedScore);
     } catch (err) {
-      console.error("Error analyzing audio:", err);
-      setError(err.message || "Failed to analyze audio");
+      console.error("Error analysing audio:", err);
+      // Provide a clearer message when the backend is unreachable.
+      if (err instanceof TypeError && err.message.includes("Failed to fetch")) {
+        setError("Unable to reach the analysis service. Make sure the backend is running at " + API_BASE);
+      } else {
+        setError(err.message || "Failed to analyse audio");
+      }
     } finally {
       setIsAnalysing(false);
     }
@@ -153,7 +222,7 @@ export default function Session() {
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        setProgress(2); // Analyzing
+        setProgress(2); // Analysing
         await handleAnalyse(audioBlob);
         setProgress(3); // Feedback
         stream.getTracks().forEach(track => track.stop());
@@ -169,6 +238,15 @@ export default function Session() {
 
   const stopRecording = () => {
     mediaRecorderRef.current?.stop();
+  };
+
+  const startFollowUp = () => {
+    if (!followUpQuestion) return;
+    setCurrentQuestion(followUpQuestion);
+    setAnalysisData(null);
+    setError(null);
+    setProgress(2);
+    setFollowUpQuestion("");
   };
 
   /* -------------------- CLEANUP -------------------- */
@@ -339,12 +417,20 @@ export default function Session() {
                     Stop Recording
                   </button>
                 </div>
-                {isAnalysing && <p style={styles.loading}>Analyzing your response...</p>}
+                {isAnalysing && <p style={styles.loading}>Analysing your response...</p>}
               </div>
             </>
           )}
 
-          {progress === 3 && <FeedbackPanel analysisData={analysisData} score={score} />}
+          {progress === 3 && (
+            <>
+              <FeedbackPanel
+                analysisData={analysisData}
+                score={score}
+                onFollowUp={startFollowUp}
+              />
+            </>
+          )}
         </>
       )}
     </div>
